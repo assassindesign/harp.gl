@@ -15,6 +15,7 @@ import { LoggerManager } from "@here/harp-utils";
 import THREE = require("three");
 
 const logger = LoggerManager.instance.create("CameraKeyTrackAnimation");
+const MIN_DISTANCE = 0;
 
 /**
  * The Options used to create a ControlPoint
@@ -55,7 +56,7 @@ export class ControlPoint
             : new GeoCoordinates(0, 0);
         this.tilt = options.tilt ?? 0;
         this.heading = options.heading ?? 0;
-        this.distance = options.distance ?? 0;
+        this.distance = options.distance ?? MIN_DISTANCE;
         this.name = options.name ?? Date.now().toString();
     }
 }
@@ -243,6 +244,7 @@ export class CameraKeyTrackAnimation {
         this.m_mapView.addEventListener(MapViewEventNames.Render, this.m_animateCb);
         this.m_mapView.beginAnimation();
         this.m_running = true;
+        this.m_animationAction.reset();
     }
 
     /**
@@ -282,7 +284,7 @@ export class CameraKeyTrackAnimation {
 
         const target = this.m_mapView.projection.unprojectPoint(this.m_dummy.position);
 
-        const distance = Math.max(0, this.m_dummy.distance);
+        const distance = Math.max(MIN_DISTANCE, this.m_dummy.distance);
         if (isNaN(tilt) || isNaN(heading) || isNaN(distance) || !target.isValid()) {
             logger.error("Cannot update due to invalid data", tilt, heading, distance, target);
         }
