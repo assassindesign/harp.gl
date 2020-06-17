@@ -92,8 +92,15 @@ export class TileGeometryManager {
      * Process the [[Tile]]s for rendering. May alter the content of the tile per frame.
      */
     updateTiles(tiles: Tile[]): void {
+        let prio = 0;
         for (const tile of tiles) {
             const geometryLoader = tile.tileGeometryLoader;
+            if (geometryLoader) {
+                //this assumes the tiles are ordered by priority, this is currently done in
+                // the visible tile set with 0 as the highest priority
+                geometryLoader.priority = prio++;
+            }
+
             if (geometryLoader !== undefined) {
                 geometryLoader.update(
                     this.enableFilterByKind ? this.enabledGeometryKinds : undefined,

@@ -40,9 +40,11 @@ import {
     LoggerManager,
     LogLevel,
     PerformanceTimer,
+    TaskQueue,
     UriResolver
 } from "@here/harp-utils";
 import * as THREE from "three";
+
 import { AnimatedExtrusionHandler } from "./AnimatedExtrusionHandler";
 import { BackgroundDataSource } from "./BackgroundDataSource";
 import { CameraMovementDetector } from "./CameraMovementDetector";
@@ -60,6 +62,7 @@ import { MapViewImageCache } from "./image/MapViewImageCache";
 import { MapAnchors } from "./MapAnchors";
 import { MapObjectAdapter } from "./MapObjectAdapter";
 import { MapViewFog } from "./MapViewFog";
+import { MapViewTaskScheduler } from "./MapViewTaskScheduler";
 import { PickHandler, PickResult } from "./PickHandler";
 import { PickingRaycaster } from "./PickingRaycaster";
 import { PoiManager } from "./poi/PoiManager";
@@ -92,6 +95,12 @@ if (isProduction) {
 } else {
     // In dev: silence logging below log (silences "debug" and "trace" levels).
     LoggerManager.instance.setLogLevelForAll(LogLevel.Log);
+}
+export enum TileTaskGroups {
+    FETCH_AND_DECODE = "fetch",
+    //DECODE = "decode",
+    CREATE = "create"
+    //UPLOAD = "upload"
 }
 
 export enum MapViewEventNames {
@@ -619,6 +628,13 @@ export interface MapViewOptions extends TextElementsRendererOptions, Partial<Loo
      * @default false
      */
     enableShadows?: boolean;
+
+    /**
+     * Enable throttling for the TaskScheduler
+     * @default false
+     * @beta
+     */
+    throttlingEnabled?: boolean;
 }
 
 /**
@@ -869,6 +885,8 @@ export class MapView extends THREE.EventDispatcher {
 
     private m_enableMixedLod: boolean | undefined;
 
+    private m_taskScheduler: MapViewTaskScheduler;
+
     /**
      * Constructs a new `MapView` with the given options or canvas element.
      *
@@ -1080,6 +1098,12 @@ export class MapView extends THREE.EventDispatcher {
             this.m_backgroundDataSource.setTilingScheme(this.m_options.backgroundTilingScheme);
         }
 
+        this.m_taskScheduler = new MapViewTaskScheduler(this);
+
+        if (options.throttlingEnabled !== undefined) {
+            this.m_taskScheduler.throttlingEnabled = options.throttlingEnabled;
+        }
+
         this.initTheme();
 
         this.m_textElementsRenderer = this.createTextRenderer();
@@ -1093,6 +1117,10 @@ export class MapView extends THREE.EventDispatcher {
      */
     get lights(): THREE.Light[] {
         return this.m_createdLights ?? [];
+    }
+
+    get taskQueue(): TaskQueue {
+        return this.m_taskScheduler.taskQueue;
     }
 
     /**
@@ -2721,6 +2749,20 @@ export class MapView extends THREE.EventDispatcher {
         return this.m_elevationProvider;
     }
 
+    /**
+     * @beta
+     */
+    get throttlingEnabled(): boolean {
+        return this.m_taskScheduler.throttlingEnabled === true;
+    }
+
+    /**
+     * @beta
+     */
+    set throttlingEnabled(enabled: boolean) {
+        this.m_taskScheduler.throttlingEnabled = enabled;
+    }
+
     get shadowsEnabled(): boolean {
         return this.m_options.enableShadows === true;
     }
@@ -3421,6 +3463,8 @@ export class MapView extends THREE.EventDispatcher {
             // the geometry creation memory consumption acounted in the next frame.
             stats.addMemoryInfo();
         }
+
+        this.m_taskScheduler.processPending(frameStartTime);
 
         DID_RENDER_EVENT.time = frameStartTime;
         this.dispatchEvent(DID_RENDER_EVENT);

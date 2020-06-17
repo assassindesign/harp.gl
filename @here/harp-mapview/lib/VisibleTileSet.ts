@@ -21,6 +21,7 @@ import { DataSource } from "./DataSource";
 import { ElevationRangeSource } from "./ElevationRangeSource";
 import { FrustumIntersection, TileKeyEntry } from "./FrustumIntersection";
 import { TileGeometryManager } from "./geometry/TileGeometryManager";
+import { TileTaskGroups } from "./MapView";
 import { Tile } from "./Tile";
 import { TileOffsetUtils } from "./Utils";
 
@@ -461,7 +462,7 @@ export class VisibleTileSet {
     }
 
     /**
-     * Gets the maximum number of tiles that can be added to the scene per frame
+     * Sets the maximum number of tiles that can be added to the scene per frame
      * @beta
      * @param value
      */
@@ -607,8 +608,10 @@ export class VisibleTileSet {
                 actuallyVisibleTiles.push(tile);
             }
 
+            // creates geometry if not yet available
             this.m_tileGeometryManager.updateTiles(actuallyVisibleTiles);
 
+            // used to actually render the tiles or find alternatives for incomplete tiles
             this.dataSourceTileList.push({
                 dataSource,
                 storageLevel,
@@ -1138,7 +1141,23 @@ export class VisibleTileSet {
         }
 
         if (!dataSource.cacheable && !cacheOnly) {
-            const resultTile = dataSource.getTile(tileKey);
+            //const resultTile = dataSource.getTile(tileKey);
+            const resultTile = dataSource.getTile(tileKey, true);
+            if (resultTile) {
+                dataSource.mapView.taskQueue.add({
+                    execute: resultTile.load.bind(resultTile),
+                    group: TileTaskGroups.FETCH_AND_DECODE,
+                    getPrio: () => {
+                        return resultTile?.tileLoader?.priority || 0;
+                    },
+                    isExpired: () => {
+                        return !resultTile?.isVisible;
+                    },
+                    estimatedProcessTime: () => {
+                        return 1;
+                    }
+                });
+            }
             updateTile(resultTile);
             return resultTile;
         }
@@ -1155,7 +1174,22 @@ export class VisibleTileSet {
             return undefined;
         }
 
-        tile = dataSource.getTile(tileKey);
+        tile = dataSource.getTile(tileKey, true);
+        if (tile) {
+            tile.dataSource.mapView.taskQueue.add({
+                execute: tile.load.bind(tile),
+                group: TileTaskGroups.FETCH_AND_DECODE,
+                getPrio: () => {
+                    return tile?.tileLoader?.priority || 0;
+                },
+                isExpired: () => {
+                    return !tile?.isVisible;
+                },
+                estimatedProcessTime: () => {
+                    return 1;
+                }
+            });
+        }
         // TODO: Update all tile information including area, min/max elevation from TileKeyEntry
         if (tile !== undefined) {
             tile.offset = offset;

@@ -133,6 +133,7 @@ export namespace FpsBenchmarkExample {
 
     const options = {
         maxTilesPerFrame: mapView.visibleTileSet.maxTilesPerFrame,
+        throttlingEnabled: mapView.throttlingEnabled,
         delayLabels: mapView.delayLabelsUntilMovementFinished,
         renderLabels: mapView.renderLabels,
         enableMixedLod: mapView.enableMixedLod || false
@@ -140,6 +141,12 @@ export namespace FpsBenchmarkExample {
     gui.add(options, "maxTilesPerFrame", 1, 100, 1)
         .onFinishChange(value => {
             mapView.visibleTileSet.maxTilesPerFrame = value;
+        })
+        .listen();
+
+    gui.add(options, "throttlingEnabled")
+        .onFinishChange(value => {
+            mapView.throttlingEnabled = value;
         })
         .listen();
 

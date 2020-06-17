@@ -3,10 +3,6 @@
  * Licensed under Apache 2.0, see full license in LICENSE
  * SPDX-License-Identifier: Apache-2.0
  */
-
-// tslint:disable:only-arrow-functions
-//    Mocha discourages using arrow functions, see https://mochajs.org/#arrow-functions
-
 import { DecodedTile } from "@here/harp-datasource-protocol";
 import {
     TileKey,
@@ -15,16 +11,21 @@ import {
     webMercatorTilingScheme
 } from "@here/harp-geoutils";
 import { DataSource, MapView, Statistics, Tile } from "@here/harp-mapview";
-import * as chai from "chai";
-import * as chaiAsPromised from "chai-as-promised";
-chai.use(chaiAsPromised);
-const { expect } = chai;
 import { TileGeometryCreator } from "@here/harp-mapview/lib/geometry/TileGeometryCreator";
 import { TileGeometryLoader } from "@here/harp-mapview/lib/geometry/TileGeometryLoader";
+import { TileTaskGroups } from "@here/harp-mapview/lib/MapView";
 import { ITileLoader, TileLoaderState } from "@here/harp-mapview/lib/Tile";
 import { willEventually } from "@here/harp-test-utils";
+import { TaskQueue } from "@here/harp-utils";
+import * as chai from "chai";
+import * as chaiAsPromised from "chai-as-promised";
 import * as sinon from "sinon";
 
+// tslint:disable:only-arrow-functions
+//    Mocha discourages using arrow functions, see https://mochajs.org/#arrow-functions
+
+chai.use(chaiAsPromised);
+const { expect } = chai;
 class FakeVisibleTileSet {
     // tslint:disable-next-line: no-empty
     disposeTile(tile: Tile) {}
@@ -33,6 +34,7 @@ class FakeVisibleTileSet {
 class FakeTileLoader implements ITileLoader {
     state: TileLoaderState = TileLoaderState.Ready;
     isFinished: boolean = false;
+    priority: number = 0;
 
     loadAndDecode(): Promise<TileLoaderState> {
         return new Promise(() => this.state);
@@ -74,7 +76,10 @@ function createFakeMapView() {
         statistics: new Statistics(),
         frameNumber: 5, // must be higher then 0, for tile visibility check
         visibleTileSet: new FakeVisibleTileSet(),
-        theme: {}
+        theme: {},
+        taskQueue: new TaskQueue({
+            groups: [TileTaskGroups.CREATE, TileTaskGroups.FETCH_AND_DECODE]
+        })
     } as any) as MapView;
 }
 
@@ -153,6 +158,8 @@ describe("TileGeometryLoader", function() {
 
             // tslint:disable-next-line: no-unused-expression
             expect(geometryLoader.geometryCreationPending).to.be.true;
+
+            geometryLoader!.tile.mapView.taskQueue.processNext(TileTaskGroups.CREATE);
 
             await willEventually(() => {
                 // tslint:disable-next-line: no-unused-expression
@@ -274,6 +281,14 @@ describe("TileGeometryLoader", function() {
             geometryLoader!.update(undefined, undefined);
             await wait();
 
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(1);
+
+            expect(geometryLoader!.tile.mapView.taskQueue.processNext(TileTaskGroups.CREATE)).equal(
+                true
+            );
+
             expect(spySetDecodedTile.callCount).equal(1);
             expect(spyProcessTechniques.callCount).equal(1);
 
@@ -283,7 +298,7 @@ describe("TileGeometryLoader", function() {
             });
         });
 
-        it("should create geometry for decoded tile only once (via timeout)", async function() {
+        it("should create geometry for decoded tile only once (via taskqueue)", async function() {
             tile.decodedTile = createFakeDecodedTile();
 
             const geometryCreator = TileGeometryCreator.instance;
@@ -299,6 +314,14 @@ describe("TileGeometryLoader", function() {
             await wait();
             geometryLoader!.update(undefined, undefined);
             await wait();
+
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(1);
+
+            expect(geometryLoader!.tile.mapView.taskQueue.processNext(TileTaskGroups.CREATE)).equal(
+                true
+            );
 
             await willEventually(() => {
                 expect(spyProcessTechniques.callCount).equal(1);
@@ -308,7 +331,7 @@ describe("TileGeometryLoader", function() {
             });
         });
 
-        it("should not create geometry for invisible tile while in timeout", async function() {
+        it("should not create geometry for invisible tile ", async function() {
             tile.decodedTile = createFakeDecodedTile();
 
             const geometryCreator = TileGeometryCreator.instance;
@@ -317,11 +340,23 @@ describe("TileGeometryLoader", function() {
             expect(spyCreateGeometries.callCount).equal(0);
             expect(spyProcessTechniques.callCount).equal(0);
 
-            // Mimic multiple frame updates.
             geometryLoader!.update(undefined, undefined);
-            // Make immediately invisible - if flaky remove this test.
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(1);
+
             tile.isVisible = false;
-            await wait();
+
+            //should remove expired task
+            geometryLoader!.tile.mapView.taskQueue.update();
+
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(0);
+
+            expect(geometryLoader!.tile.mapView.taskQueue.processNext(TileTaskGroups.CREATE)).equal(
+                false
+            );
 
             await willEventually(() => {
                 expect(spyProcessTechniques.callCount).equal(1);
@@ -341,8 +376,23 @@ describe("TileGeometryLoader", function() {
             expect(spyProcessTechniques.callCount).equal(0);
 
             geometryLoader!.update(undefined, undefined);
-            // Make immediately disposed - if flaky remove this test.
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(1);
+
+            // Make immediately disposed
             tile.dispose();
+
+            //should remove expired task
+            geometryLoader!.tile.mapView.taskQueue.update();
+
+            expect(
+                geometryLoader!.tile.mapView.taskQueue.numItemsLeft(TileTaskGroups.CREATE)
+            ).equal(0);
+
+            expect(geometryLoader!.tile.mapView.taskQueue.processNext(TileTaskGroups.CREATE)).equal(
+                false
+            );
 
             await willEventually(() => {
                 expect(spyProcessTechniques.callCount).equal(1);
