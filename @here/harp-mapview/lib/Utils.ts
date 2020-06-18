@@ -790,8 +790,31 @@ export namespace MapViewUtils {
     export function panCameraAboveFlatMap(
         mapView: MapView,
         offsetX: number,
-        offsetY: number
+        offsetY: number,
+        bounds?: GeoBox
     ): void {
+        if (bounds) {
+            const worldPos = mapView.camera.position.clone();
+            worldPos.x += offsetX;
+            worldPos.y += offsetY;
+
+            const geoPos = mapView.projection.unprojectPoint(worldPos);
+            geoPos.altitude = undefined;
+            if (!bounds.contains(geoPos)) {
+                geoPos.latitude = Math.min(
+                    bounds.northEast.latitude,
+                    Math.max(bounds.southWest.latitude, geoPos.latitude)
+                );
+                geoPos.longitude = Math.min(
+                    bounds.northEast.longitude,
+                    Math.max(bounds.southWest.longitude, geoPos.longitude)
+                );
+                mapView.projection.projectPoint(geoPos, worldPos);
+                mapView.camera.position.x = worldPos.x;
+                mapView.camera.position.y = worldPos.y;
+                return;
+            }
+        }
         mapView.camera.position.x += offsetX;
         mapView.camera.position.y += offsetY;
     }

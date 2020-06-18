@@ -5,6 +5,7 @@
  */
 
 import * as geoUtils from "@here/harp-geoutils";
+import { GeoBox } from "@here/harp-geoutils";
 import { MapView, MapViewEventNames, MapViewUtils } from "@here/harp-mapview";
 import * as THREE from "three";
 import * as utils from "./Utils";
@@ -215,6 +216,8 @@ export class MapControls extends THREE.EventDispatcher {
      * The value is in seconds. `300ms` is picked as the default value as jQuery does.
      */
     doubleTapTime = 0.3;
+
+    bounds?: GeoBox;
 
     /**
      * Three.js camera that this controller affects.
@@ -863,7 +866,8 @@ export class MapControls extends THREE.EventDispatcher {
             MapViewUtils.panCameraAboveFlatMap(
                 this.mapView,
                 this.m_panDistanceFrameDelta.x,
-                this.m_panDistanceFrameDelta.y
+                this.m_panDistanceFrameDelta.y,
+                this.bounds
             );
         } else if (this.mapView.projection.type === geoUtils.ProjectionType.Spherical) {
             MapViewUtils.panCameraAroundGlobe(
